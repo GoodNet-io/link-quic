@@ -168,6 +168,12 @@ private:
     bool                                                             verify_peer_ = true;
 
     const host_api_t* api_ = nullptr;
+    /// Per-session pending-write hard cap mirrored from operator
+    /// config (`limits.pending_queue_bytes_hard`). `do_send` rejects
+    /// with `GN_ERR_LIMIT_REACHED` when the active stream's
+    /// `pending_bytes_ + new > cap`. Zero (default) preserves the
+    /// historical unbounded behaviour.
+    std::uint64_t                                                    pending_queue_bytes_hard_ = 0;
 
     /// Composer-mode state. `carrier_` is the UDP carrier the plugin
     /// queries through `gn.link.udp` (or `gn.link.ice` after Слайс 11).

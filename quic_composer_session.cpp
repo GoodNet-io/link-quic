@@ -289,8 +289,20 @@ void QuicLink::ComposerSession::feed_inbound(
 gn_result_t QuicLink::ComposerSession::do_send(
     std::span<const std::uint8_t> plain) {
     std::lock_guard lk(mu_);
+    /// Reject early if the per-session pending bytes would exceed
+    /// the operator-configured hard cap. Mirrors TCP / IPC / TLS /
+    /// WS — the producer back-pressures via `GN_ERR_LIMIT_REACHED`
+    /// instead of letting `pending_writes_` grow unbounded under a
+    /// slow consumer or pre-handshake parking.
+    if (auto* t = transport_.lock().get(); t != nullptr) {
+        const auto cap = t->pending_queue_bytes_hard_;
+        if (cap != 0 && pending_bytes_ + plain.size() > cap) {
+            return GN_ERR_LIMIT_REACHED;
+        }
+    }
     if (!handshake_done_ || !stream_ssl_) {
         pending_writes_.emplace_back(plain.begin(), plain.end());
+        pending_bytes_ += plain.size();
         return GN_OK;
     }
     const int n = SSL_write(stream_ssl_, plain.data(),
@@ -412,6 +424,7 @@ void QuicLink::ComposerSession::pump_unlocked(
                                      static_cast<int>(buf.size()));
                 }
                 pending_writes_.clear();
+                pending_bytes_ = 0;
             }
             drain_to_carrier_unlocked();
         } else {

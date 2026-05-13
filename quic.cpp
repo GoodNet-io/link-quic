@@ -79,6 +79,15 @@ QuicLink::~QuicLink() {
 void QuicLink::set_host_api(const host_api_t* api) noexcept {
     api_         = api;
     verify_peer_ = true;
+    /// Cache the operator-config pending-queue caps so `do_send` can
+    /// reject before pending_writes_ grows unbounded. Zero (the
+    /// default) leaves the legacy unbounded behaviour for tests
+    /// that never set limits. Matches TCP / IPC / TLS / WS path.
+    if (api_ != nullptr && api_->limits != nullptr) {
+        if (const auto* L = api_->limits(api_->host_ctx); L != nullptr) {
+            pending_queue_bytes_hard_ = L->pending_queue_bytes_hard;
+        }
+    }
 }
 
 void QuicLink::set_server_credentials(std::string_view cert_pem,

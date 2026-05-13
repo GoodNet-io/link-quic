@@ -122,6 +122,13 @@ private:
     bool                                   closed_         = false;
     std::string                            peer_uri_;
     std::deque<std::vector<std::uint8_t>>  pending_writes_;
+    /// Sum of bytes currently parked in `pending_writes_`. Bounded
+    /// by `QuicLink::pending_queue_bytes_hard_` (operator config
+    /// `limits.pending_queue_bytes_hard`); zero means unbounded.
+    /// Mirrors the same invariant TCP / IPC / TLS / WS plugins
+    /// uphold so an out-of-control producer can't drive the
+    /// stream's memory footprint without limit.
+    std::size_t                            pending_bytes_  = 0;
 
     asio::strand<asio::io_context::executor_type> strand_;
     asio::steady_timer                            tick_timer_;
