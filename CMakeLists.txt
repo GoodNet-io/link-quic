@@ -18,7 +18,7 @@ endif()
 # Uses OpenSSL 3.6+ native QUIC API (OSSL_QUIC_server_method /
 # OSSL_QUIC_client_method + SSL_new_listener / SSL_new_stream). The
 # plugin sits on top of UDP carrier via LinkCarrier pattern, same
-# shape as TLS-on-TCP and DTLS-on-UDP (5d). Per-connection ComposerSession
+# shape as TLS-on-TCP and DTLS-on-UDP. Per-connection ComposerSession
 # drives the SSL state machine through a BIO_pair pump; encrypted bytes
 # go out via the carrier, decrypted application bytes flow up through
 # the composer data subscribers.

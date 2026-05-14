@@ -5,12 +5,12 @@
 ///
 /// QUIC's role in the stack is to provide
 /// `Stream | Reliable | Ordered | EncryptedPath` on top of UDP carriers
-/// — including the NAT-traversed UDP that ICE (Слайс 11) gives. That
-/// unlocks Noise IK/XX (which requires reliable+ordered) over
-/// peer-to-peer paths and makes "ICE with optional TLS" possible.
+/// — including the NAT-traversed UDP that ICE gives. That unlocks
+/// Noise IK/XX (which requires reliable+ordered) over peer-to-peer
+/// paths and makes "ICE with optional TLS" possible.
 ///
-/// Implementation strategy: mirror `plugins/links/tls/tls.hpp` after
-/// the 10a split. Each connection-level QUIC handshake lives in a
+/// Implementation strategy: mirror the TLS plugin's composer-session
+/// split. Each connection-level QUIC handshake lives in a
 /// `ComposerSession` (declared in `quic_composer_session.hpp`) that
 /// wraps an OpenSSL `SSL*` driven by a memory BIO_pair. The carrier
 /// owns the wire. Per-stream `SSL*` objects (via `SSL_new_stream` /
@@ -89,8 +89,8 @@ public:
 
     /// Composer L2 surface. QUIC layers over a UDP carrier — direct UDP
     /// (`quic://host:port` → carrier `udp://host:port`) or ICE
-    /// NAT-traversed UDP once Слайс 11 lands (`quic+ice://peer-pk-hex` →
-    /// carrier `ice://peer-pk-hex`).
+    /// NAT-traversed UDP (`quic+ice://peer-pk-hex` → carrier
+    /// `ice://peer-pk-hex`).
     [[nodiscard]] gn_result_t composer_listen(std::string_view uri);
     [[nodiscard]] gn_result_t composer_connect(std::string_view uri,
                                                 gn_conn_id_t* out_conn);
@@ -176,7 +176,8 @@ private:
     std::uint64_t                                                    pending_queue_bytes_hard_ = 0;
 
     /// Composer-mode state. `carrier_` is the UDP carrier the plugin
-    /// queries through `gn.link.udp` (or `gn.link.ice` after Слайс 11).
+    /// queries through `gn.link.udp` (or `gn.link.ice` for the
+    /// NAT-traversed route).
     std::optional<gn::sdk::LinkCarrier>                              carrier_;
     mutable std::mutex                                               composer_mu_;
     std::unordered_map<gn_conn_id_t,

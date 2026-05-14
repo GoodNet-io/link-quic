@@ -118,8 +118,9 @@ struct UdpCarrierBridge {
 
 /// Bridge wrapping a real `IceLink` behind a `gn_link_api_t` vtable
 /// that `LinkCarrier::query` can resolve through the harness's
-/// `query_extension_checked`. Mirrors `UdpCarrierBridge`; surfaces
-/// the full composer slot family ICE landed in Слайс 11b.
+/// `query_extension_checked`. Mirrors `UdpCarrierBridge` and surfaces
+/// the full ICE composer slot family (listen / connect /
+/// subscribe_data / subscribe_accept).
 struct IceCarrierBridge {
     std::shared_ptr<gn::link::ice::IceLink> ice;
     gn_link_api_t vtable{};
@@ -443,15 +444,15 @@ TEST(QuicLink, ComposerConnectIceWithBridgeAllocatesCid) {
     harness.ice_bridge->ice->shutdown();
 }
 
-/// Слайс 8b progress: the listener-pattern rework (BIO_dgram_pair +
-/// SSL_new_listener + ALPN + SSL_set1_initial_peer_addr) gets the
-/// QUIC state machine to advance through ClientHello processing —
-/// packets fly in both directions, ALPN selects "gn-v1", server
-/// reaches `TLS_ST_EARLY_DATA`, client reaches `TLS_ST_CW_CLNT_HELLO`
-/// and stays there. Stuck point: BIO_write on the receiving network
-/// BIO loses the original sender's src address (memory-pair forward
-/// uses the receiving BIO's default peer), so the receiving SSL sees
-/// every datagram as coming from `127.0.0.1:1` rather than the real
+/// Listener-pattern smoke (BIO_dgram_pair + SSL_new_listener + ALPN
+/// + SSL_set1_initial_peer_addr): the QUIC state machine advances
+/// through ClientHello processing — packets fly in both directions,
+/// ALPN selects "gn-v1", server reaches `TLS_ST_EARLY_DATA`, client
+/// reaches `TLS_ST_CW_CLNT_HELLO` and stays there. Stuck point:
+/// BIO_write on the receiving network BIO loses the original
+/// sender's src address (memory-pair forward uses the receiving
+/// BIO's default peer), so the receiving SSL sees every datagram
+/// as coming from `127.0.0.1:1` rather than the real
 /// peer. QUIC connection routing then can't reassemble the handshake
 /// fragments under the correct (local, peer) tuple.
 ///

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /// @file   plugins/links/quic/quic_composer_session.cpp
 /// @brief  QuicLink::ComposerSession — OpenSSL 3.6 native QUIC over a
-///         datagram BIO pair. Listener-pattern on the server side per
-///         the rework captured in Слайс 8b of the plan.
+///         datagram BIO pair. Listener-pattern on the server side
+///         (`SSL_new_listener` + `SSL_accept_connection`); per-conn
+///         BIO_dgram_pair routes one ingress + egress datagram queue
+///         per peer.
 
 #include "quic_composer_session.hpp"
 
