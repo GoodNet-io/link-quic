@@ -86,6 +86,8 @@ void QuicLink::set_host_api(const host_api_t* api) noexcept {
     if (api_ != nullptr && api_->limits != nullptr) {
         if (const auto* L = api_->limits(api_->host_ctx); L != nullptr) {
             pending_queue_bytes_hard_ = L->pending_queue_bytes_hard;
+            pending_queue_bytes_high_ = L->pending_queue_bytes_high;
+            pending_queue_bytes_low_  = L->pending_queue_bytes_low;
         }
     }
 }

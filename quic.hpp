@@ -174,6 +174,16 @@ private:
     /// `pending_bytes_ + new > cap`. Zero (default) preserves the
     /// historical unbounded behaviour.
     std::uint64_t                                                    pending_queue_bytes_hard_ = 0;
+    /// Soft watermarks for `notify_backpressure` SOFT / CLEAR
+    /// events. Mirrors the TCP path
+    /// (`plugins/links/tcp/tcp.cpp:236-270`). When a
+    /// ComposerSession's `pending_bytes_` crosses `_high_` upward
+    /// the kernel sees one `GN_CONN_EVENT_BACKPRESSURE_SOFT`;
+    /// once it falls back below `_low_` one
+    /// `GN_CONN_EVENT_BACKPRESSURE_CLEAR` mirrors that. Zero
+    /// (default) keeps the silent behaviour.
+    std::uint64_t                                                    pending_queue_bytes_high_ = 0;
+    std::uint64_t                                                    pending_queue_bytes_low_  = 0;
 
     /// Composer-mode state. `carrier_` is the UDP carrier the plugin
     /// queries through `gn.link.udp` (or `gn.link.ice` for the

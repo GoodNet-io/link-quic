@@ -129,6 +129,11 @@ private:
     /// uphold so an out-of-control producer can't drive the
     /// stream's memory footprint without limit.
     std::size_t                            pending_bytes_  = 0;
+    /// One-shot rising-edge state for `GN_CONN_EVENT_BACKPRESSURE_SOFT`.
+    /// `pending_bytes_` is mutated under `mu_`, so a plain `bool`
+    /// is enough — no atomic. Cleared when `pending_bytes_` falls
+    /// back below the low watermark and `CLEAR` is emitted.
+    bool                                   soft_signaled_  = false;
 
     asio::strand<asio::io_context::executor_type> strand_;
     asio::steady_timer                            tick_timer_;

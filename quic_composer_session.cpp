@@ -305,6 +305,24 @@ gn_result_t QuicLink::ComposerSession::do_send(
     if (!handshake_done_ || !stream_ssl_) {
         pending_writes_.emplace_back(plain.begin(), plain.end());
         pending_bytes_ += plain.size();
+        /// Soft-watermark trip mirrors the TCP path
+        /// (`tcp.cpp:236-270`). One-shot: the rising-edge `SOFT`
+        /// emits the first time `pending_bytes_` crosses the high
+        /// watermark; subsequent edges only emit after `CLEAR`
+        /// (in `pump_unlocked` when bytes drain below `_low_`).
+        if (auto* t = transport_.lock().get(); t != nullptr) {
+            if (t->pending_queue_bytes_high_ != 0 &&
+                !soft_signaled_ &&
+                pending_bytes_ > t->pending_queue_bytes_high_) {
+                soft_signaled_ = true;
+                if (t->api_ && t->api_->notify_backpressure) {
+                    (void)t->api_->notify_backpressure(
+                        t->api_->host_ctx, l1_id_,
+                        GN_CONN_EVENT_BACKPRESSURE_SOFT,
+                        pending_bytes_);
+                }
+            }
+        }
         return GN_OK;
     }
     const int n = SSL_write(stream_ssl_, plain.data(),
@@ -427,6 +445,20 @@ void QuicLink::ComposerSession::pump_unlocked(
                 }
                 pending_writes_.clear();
                 pending_bytes_ = 0;
+                /// Falling-edge `CLEAR` after the pre-handshake
+                /// backlog drains. Pairs with the `SOFT` emit in
+                /// `do_send` — operator dashboards see one CLEAR
+                /// per matching SOFT.
+                if (soft_signaled_) {
+                    soft_signaled_ = false;
+                    if (auto* t = transport_.lock().get();
+                        t != nullptr && t->api_ &&
+                        t->api_->notify_backpressure) {
+                        (void)t->api_->notify_backpressure(
+                            t->api_->host_ctx, l1_id_,
+                            GN_CONN_EVENT_BACKPRESSURE_CLEAR, 0);
+                    }
+                }
             }
             drain_to_carrier_unlocked();
         } else {
