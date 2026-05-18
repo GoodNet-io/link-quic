@@ -1,0 +1,51 @@
+{
+  "nodes": {
+    "goodnet": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "dir": "nix/kernel-only",
+        "lastModified": 1779121483,
+        "narHash": "sha256-qzOsjrGlA8hHR2PnMumhlmk2K++Lb8a4dQzboV0mO0M=",
+        "ref": "refs/heads/dev",
+        "rev": "298c011b4645145e5acc99b87980d7999176d874",
+        "revCount": 1344,
+        "type": "git",
+        "url": "file:../../.."
+      },
+      "original": {
+        "dir": "nix/kernel-only",
+        "type": "git",
+        "url": "file:../../.."
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1778869304,
+        "narHash": "sha256-30sZNZoA1cqF5JNO9fVX+wgiQYjB7HJqqJ4ztCDeBZE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "goodnet": "goodnet",
+        "nixpkgs": [
+          "goodnet",
+          "nixpkgs"
+        ]
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
