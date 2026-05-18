@@ -14,8 +14,9 @@
 ///
 /// Per-peer listener wastes ~50 KB / server peer (one listener struct
 /// per peer); accepted in v1 as the cleanest mapping to the composer
-/// pattern (one L1 carrier conn = one peer = one ComposerSession). A
-/// shared listener with carrier-side address demux is the v1.1 path.
+/// pattern (one L1 carrier conn = one peer = one ComposerSession).
+/// A shared listener with carrier-side address demux is a planned
+/// extension.
 
 #pragma once
 
