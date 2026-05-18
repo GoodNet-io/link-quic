@@ -29,7 +29,8 @@ add_library(goodnet_quic_objects OBJECT
 )
 target_link_libraries(goodnet_quic_objects PUBLIC
     GoodNet::sdk asio::asio Threads::Threads
-    OpenSSL::SSL OpenSSL::Crypto)
+    OpenSSL::SSL OpenSSL::Crypto
+    PkgConfig::SODIUM)
 target_compile_features(goodnet_quic_objects PUBLIC cxx_std_23)
 target_compile_options(goodnet_quic_objects PRIVATE
     -Wall -Wextra -Wpedantic -Wno-unused-parameter)
