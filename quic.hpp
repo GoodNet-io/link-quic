@@ -40,6 +40,7 @@
 #include <openssl/ssl.h>
 
 #include <sdk/cpp/link_carrier.hpp>
+#include <sdk/cpp/uri.hpp>
 #include <sdk/extensions/link.h>
 #include <sdk/host_api.h>
 #include <sdk/trust.h>

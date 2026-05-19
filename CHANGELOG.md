@@ -7,6 +7,13 @@ composer surface in `docs/contracts/link.en.md` §8.
 
 ## [Unreleased]
 
+### quic: use sdk/cpp/uri.hpp for scheme handling
+
+composer_listen / composer_connect now parse `quic://...` through
+gn::parse_uri instead of starts_with + substr(7). Future schemes
+(quics, quicv2) handled automatically; consistent with every
+other transport plugin.
+
 ### Backpressure SOFT / CLEAR through the composer session
 
 `ComposerSession::do_send` now enforces a

@@ -22,35 +22,66 @@ namespace gn::link::quic {
 
 namespace {
 
-/// Detect carrier scheme from the post-`quic://` URI suffix.
-/// 64 hex characters → `ice` (peer-pubkey shape, NAT-traversed
-/// UDP carrier); anything else → `udp` (direct host:port carrier).
-/// The suffix is the operator-visible URI minus the `quic://`
-/// prefix, e.g. `127.0.0.1:9999` or
-/// `0123456789abcdef...` (64 chars).
-[[nodiscard]] std::string_view detect_carrier_scheme(
-    std::string_view suffix) noexcept {
-    if (suffix.size() != 64) return "udp";
-    for (const char c : suffix) {
+/// True iff @p s is exactly 64 hex characters — the peer-pubkey
+/// shape that routes `quic://...` through the ICE carrier rather
+/// than the direct UDP carrier.
+[[nodiscard]] bool looks_like_peer_pk_hex64(
+    std::string_view s) noexcept {
+    if (s.size() != 64) return false;
+    for (const char c : s) {
         const bool hex_lower = c >= '0' && c <= '9';
         const bool hex_alpha = (c >= 'a' && c <= 'f')
                              || (c >= 'A' && c <= 'F');
-        if (!hex_lower && !hex_alpha) return "udp";
+        if (!hex_lower && !hex_alpha) return false;
     }
-    return "ice";
+    return true;
 }
 
-/// Compose the carrier URI for a detected scheme. `udp://<suffix>`
-/// preserves operator-supplied `host:port`; `ice://<suffix>` carries
-/// the peer pubkey hex unchanged.
-[[nodiscard]] std::string rewrite_carrier_uri(
-    std::string_view suffix, std::string_view scheme) {
-    std::string out;
-    out.reserve(scheme.size() + 3 + suffix.size());
-    out.append(scheme);
-    out.append("://");
-    out.append(suffix);
-    return out;
+/// Result of `parse_quic_uri`: the carrier scheme to route through
+/// (`"udp"` for host:port, `"ice"` for peer-pk hex) and the
+/// pre-composed carrier URI (`udp://host:port`, `udp://[v6]:port`
+/// or `ice://<64-hex>`) ready to feed into the carrier's
+/// `listen` / `connect`.
+struct QuicUriRoute {
+    std::string carrier_scheme;
+    std::string carrier_uri;
+};
+
+/// Parse a `quic://...` URI through `gn::parse_uri` and route it to
+/// the correct L1 carrier. Two shapes are accepted:
+///   * `quic://host:port` (or `quic://[v6]:port`) → UDP carrier;
+///     the carrier URI re-uses `UriParts::host_authority()` so v6
+///     literals come back bracketed.
+///   * `quic://<64-hex peer-pk>` → ICE carrier; `gn::parse_uri`
+///     rejects port-less URIs for non-ipc schemes, so we look for
+///     the `://` boundary ourselves before validating the hex shape.
+/// Returns `nullopt` on every other shape (malformed scheme, bad
+/// port, garbage suffix).
+[[nodiscard]] std::optional<QuicUriRoute> parse_quic_uri(
+    std::string_view uri) {
+    if (auto parts = gn::parse_uri(uri);
+        parts && parts->scheme == "quic" && !parts->is_path_style())
+    {
+        QuicUriRoute r;
+        r.carrier_scheme = "udp";
+        r.carrier_uri    = "udp://";
+        r.carrier_uri   += parts->host_authority();
+        return r;
+    }
+    /// `gn::parse_uri` only treats `ipc` as path-style, so a
+    /// `quic://<peer-pk>` URI (no port) lands here. Locate the
+    /// `://` boundary the same way the parser does — that keeps the
+    /// scheme check honest without re-introducing `starts_with`.
+    const auto sep = uri.find("://");
+    if (sep == std::string_view::npos) return std::nullopt;
+    if (uri.substr(0, sep) != "quic") return std::nullopt;
+    const auto rest = uri.substr(sep + 3);
+    if (!looks_like_peer_pk_hex64(rest)) return std::nullopt;
+    QuicUriRoute r;
+    r.carrier_scheme = "ice";
+    r.carrier_uri    = "ice://";
+    r.carrier_uri   += rest;
+    return r;
 }
 
 }  // namespace
@@ -323,15 +354,15 @@ bool QuicLink::load_server_credentials() {
 
 gn_result_t QuicLink::composer_listen(std::string_view uri) {
     if (shutdown_.load(std::memory_order_acquire)) return GN_ERR_INVALID_STATE;
-    if (!uri.starts_with("quic://")) {
+    const auto route = parse_quic_uri(uri);
+    if (!route) {
         gn_log_warn(api_, "quic: composer_listen reject malformed uri "
                           "(expected quic://, got %.*s)",
                     static_cast<int>(uri.size()), uri.data());
         return GN_ERR_INVALID_ENVELOPE;
     }
 
-    const auto suffix = uri.substr(7);
-    const auto carrier_scheme = detect_carrier_scheme(suffix);
+    const std::string_view carrier_scheme = route->carrier_scheme;
     if (const auto rc = ensure_carrier(carrier_scheme); rc != GN_OK) {
         gn_log_warn(api_, "quic: composer_listen ensure_carrier(%.*s) "
                           "failed rc=%d",
@@ -350,7 +381,7 @@ gn_result_t QuicLink::composer_listen(std::string_view uri) {
         return GN_ERR_NULL_ARG;
     }
 
-    const std::string l1_uri = rewrite_carrier_uri(suffix, carrier_scheme);
+    const std::string& l1_uri = route->carrier_uri;
 
     auto self_weak = weak_from_this();
     const auto rc = carrier_->on_accept(
@@ -378,15 +409,15 @@ gn_result_t QuicLink::composer_connect(std::string_view uri,
     if (!out_conn) return GN_ERR_NULL_ARG;
     *out_conn = GN_INVALID_ID;
     if (shutdown_.load(std::memory_order_acquire)) return GN_ERR_INVALID_STATE;
-    if (!uri.starts_with("quic://")) {
+    const auto route = parse_quic_uri(uri);
+    if (!route) {
         gn_log_warn(api_, "quic: composer_connect reject malformed uri "
                           "(expected quic://, got %.*s)",
                     static_cast<int>(uri.size()), uri.data());
         return GN_ERR_INVALID_ENVELOPE;
     }
 
-    const auto suffix = uri.substr(7);
-    const auto carrier_scheme = detect_carrier_scheme(suffix);
+    const std::string_view carrier_scheme = route->carrier_scheme;
     if (const auto rc = ensure_carrier(carrier_scheme); rc != GN_OK) {
         gn_log_warn(api_, "quic: composer_connect ensure_carrier(%.*s) "
                           "rc=%d",
@@ -400,7 +431,7 @@ gn_result_t QuicLink::composer_connect(std::string_view uri,
         return rc;
     }
 
-    const std::string l1_uri = rewrite_carrier_uri(suffix, carrier_scheme);
+    const std::string& l1_uri = route->carrier_uri;
 
     gn_conn_id_t l1 = GN_INVALID_ID;
     if (const auto rc = carrier_->connect(l1_uri, &l1); rc != GN_OK) {
