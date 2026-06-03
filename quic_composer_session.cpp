@@ -390,13 +390,17 @@ void QuicLink::ComposerSession::schedule_next_tick_unlocked() {
     struct timeval tv = {};
     int is_infinite   = 0;
     if (SSL_get_event_timeout(drive, &tv, &is_infinite) != 1) return;
-    if (is_infinite) return;
-    auto delay = std::chrono::microseconds(
-        static_cast<std::int64_t>(tv.tv_sec) * 1'000'000 + tv.tv_usec);
-    /// Floor at 1 ms so even tight retransmit timers don't busy-spin
-    /// through the asio executor.
-    if (delay < std::chrono::milliseconds{1}) {
-        delay = std::chrono::milliseconds{1};
+    std::chrono::steady_clock::duration delay;
+    if (is_infinite) {
+        // OpenSSL sees no retransmit deadline, but Noise-over-QUIC can leave
+        // data in the BIO that only moves when SSL_handle_events() runs.
+        // A 50 ms safety poll keeps the BIO drained without busy-spinning.
+        delay = std::chrono::milliseconds{50};
+    } else {
+        delay = std::chrono::microseconds(
+            static_cast<std::int64_t>(tv.tv_sec) * 1'000'000 + tv.tv_usec);
+        if (delay < std::chrono::milliseconds{1})
+            delay = std::chrono::milliseconds{1};
     }
     tick_timer_.expires_after(delay);
     auto self = shared_from_this();
@@ -466,6 +470,14 @@ void QuicLink::ComposerSession::pump_unlocked(
             return;
         }
     }
+
+    /// Post-handshake receive path: process any bytes that were injected
+    /// into network_bio_ by feed_inbound before this pump call. Without
+    /// an explicit SSL_handle_events here, injected data sits in the BIO
+    /// unprocessed — SSL_get_event_timeout then returns is_infinite so
+    /// schedule_next_tick_unlocked skips the tick, stalling the connection
+    /// until the next do_send call drives events from the sender side.
+    (void)SSL_handle_events(ssl_);
 
     /// Server polls until the peer's stream materialises post-handshake.
     /// `do_send` may have parked application writes in `pending_writes_`
