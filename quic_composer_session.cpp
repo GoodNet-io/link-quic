@@ -15,7 +15,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include <asio/bind_executor.hpp>
+#include <stdexec/execution.hpp>
+#include <exec/timed_thread_scheduler.hpp>
+#include <exec/start_detached.hpp>
+namespace exec = experimental::execution;
 
 #include <chrono>
 #include <cstdlib>
@@ -58,13 +61,15 @@ constexpr std::uint8_t kAlpnGnV1[] = {5, 'g', 'n', '-', 'v', '1'};
 /// server's BIO local_addr (the listener routes incoming packets by
 /// their dst tuple). Both sides therefore agree on `kServerLocal`;
 /// the client uses `kClientLocal` for its own BIO halves.
-constexpr std::uint16_t kServerPort = 443;
-constexpr std::uint16_t kClientPort = 5000;
 /// Both endpoints use the 127.0.0.1 loopback. Per QUIC path-validation
 /// semantics the (local, peer) tuple must agree on the IP family;
 /// putting client and server on different /8 subnets (127.0.0.1 vs
 /// 127.0.0.2) breaks the implicit "same network" expectation.
 constexpr std::uint8_t  kLoopbackOctet = 1;
+/// Base port for per-session synthetic BIO addresses. Session idx N
+/// gets server=40000+2N, client=40001+2N — unique per concurrent session
+/// so SSL_CTX internal address-keyed state does not collide.
+constexpr std::uint16_t kBioPortBase = 40000;
 
 }  // namespace
 
@@ -73,14 +78,16 @@ QuicLink::ComposerSession::ComposerSession(
     Mode                    mode,
     gn_conn_id_t            l1_id,
     gn_conn_id_t            composer_id,
+    std::uint32_t           session_idx,
     std::weak_ptr<QuicLink> transport,
-    asio::io_context&       ioc)
+    exec::timed_thread_context* timer_ctx
+    )
     : mode_(mode),
       l1_id_(l1_id),
       composer_id_(composer_id),
       transport_(std::move(transport)),
-      strand_(asio::make_strand(ioc.get_executor())),
-      tick_timer_(strand_) {
+      timer_ctx_(timer_ctx)
+      {
     /// Datagram-preserving BIO pair. Streaming `BIO_new_bio_pair`
     /// would coalesce QUIC packets and break the state machine —
     /// every BIO_read must yield exactly one record.
@@ -110,16 +117,14 @@ QuicLink::ComposerSession::ComposerSession(
     (void)BIO_dgram_set_local_addr_enable(internal_bio_, 1);
     (void)BIO_dgram_set_local_addr_enable(network_bio_, 1);
 
-    /// Synthetic loopback addresses. Server owns 127.0.0.1:443, client
-    /// owns 127.0.0.1:5000; both endpoints share the 127.0.0.1 /32 so
-    /// path validation accepts the (local, peer) tuple. Fixed values
-    /// are safe because each session has its own private
-    /// BIO_dgram_pair — different sessions never see each other's
-    /// datagrams.
-    const std::uint16_t my_port    = (mode_ == Mode::Server) ? kServerPort
-                                                                : kClientPort;
-    const std::uint16_t their_port = (mode_ == Mode::Server) ? kClientPort
-                                                                : kServerPort;
+    /// Synthetic loopback addresses. Each session pair gets unique ports
+    /// kBioPortBase + 2*idx (server) and kBioPortBase + 2*idx + 1 (client)
+    /// so that concurrent sessions do not share (local_addr, peer_addr)
+    /// tuples inside the shared SSL_CTX state.
+    const std::uint16_t server_port = static_cast<std::uint16_t>(kBioPortBase + 2u * session_idx);
+    const std::uint16_t client_port = static_cast<std::uint16_t>(kBioPortBase + 2u * session_idx + 1u);
+    const std::uint16_t my_port    = (mode_ == Mode::Server) ? server_port : client_port;
+    const std::uint16_t their_port = (mode_ == Mode::Server) ? client_port : server_port;
     local_addr_ = make_loopback_addr_v4(kLoopbackOctet, my_port);
     peer_addr_  = make_loopback_addr_v4(kLoopbackOctet, their_port);
     if (local_addr_ && peer_addr_) {
@@ -384,7 +389,7 @@ void QuicLink::ComposerSession::tick() {
 
 void QuicLink::ComposerSession::schedule_next_tick_unlocked() {
     /// Called under `mu_`. OpenSSL tells us when it next wants
-    /// `SSL_handle_events` invoked; we arm an asio timer accordingly.
+    /// `SSL_handle_events` invoked; we arm a timer accordingly.
     SSL* drive = active_ssl_unlocked();
     if (!drive) return;
     struct timeval tv = {};
@@ -402,14 +407,15 @@ void QuicLink::ComposerSession::schedule_next_tick_unlocked() {
         if (delay < std::chrono::milliseconds{1})
             delay = std::chrono::milliseconds{1};
     }
-    tick_timer_.expires_after(delay);
-    auto self = shared_from_this();
-    tick_timer_.async_wait(
-        asio::bind_executor(strand_,
-            [self](const std::error_code& ec) {
-                if (ec) return;
+    if (timer_ctx_) {
+        exec::start_detached(
+            exec::schedule_after(timer_ctx_->get_scheduler(), delay)
+            | stdexec::then([self = shared_from_this()]() noexcept {
                 self->tick();
-            }));
+            })
+            | stdexec::upon_stopped([]() noexcept {})
+        );
+    }
 }
 
 void QuicLink::ComposerSession::pump_unlocked(

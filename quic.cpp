@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <thread>
 #include <utility>
 
 namespace gn::link::quic {
@@ -87,17 +86,7 @@ struct QuicUriRoute {
 }  // namespace
 
 QuicLink::QuicLink()
-    : ioc_(),
-      work_(asio::make_work_guard(ioc_)) {
-    /// Worker pool sized symmetrically with the other link plugins.
-    /// Per-session strands serialise OpenSSL state per connection
-    /// because `SSL*` is not thread-safe.
-    const unsigned hc = std::thread::hardware_concurrency();
-    const unsigned n  = std::max(1u, hc / 2);
-    workers_.reserve(n);
-    for (unsigned i = 0; i < n; ++i) {
-        workers_.emplace_back([this] { ioc_.run(); });
-    }
+{
 }
 
 QuicLink::~QuicLink() {
@@ -246,12 +235,6 @@ void QuicLink::shutdown() {
     for (auto& cs : composer_drain) cs->do_close();
     carrier_.reset();
 
-    work_.reset();
-    ioc_.stop();
-    for (auto& w : workers_) {
-        if (w.joinable()) w.join();
-    }
-    workers_.clear();
 }
 
 gn_result_t QuicLink::ensure_carrier(std::string_view scheme) {
@@ -443,9 +426,13 @@ gn_result_t QuicLink::composer_connect(std::string_view uri,
     const gn_conn_id_t composer_id =
         next_composer_id_.fetch_add(1, std::memory_order_relaxed)
         | kComposerIdBit;
+    const std::uint32_t session_idx =
+        next_session_idx_.fetch_add(1, std::memory_order_relaxed);
     auto cs = std::make_shared<ComposerSession>(
         client_ctx_, ComposerSession::Mode::Client,
-        l1, composer_id, weak_from_this(), ioc_);
+        l1, composer_id, session_idx, weak_from_this()
+        , &timer_ctx_
+        );
     {
         std::lock_guard lk(composer_mu_);
         composer_sessions_[composer_id] = cs;
@@ -525,9 +512,13 @@ void QuicLink::composer_on_l1_accept(gn_conn_id_t l1,
     const gn_conn_id_t composer_id =
         next_composer_id_.fetch_add(1, std::memory_order_relaxed)
         | kComposerIdBit;
+    const std::uint32_t session_idx =
+        next_session_idx_.fetch_add(1, std::memory_order_relaxed);
     auto cs = std::make_shared<ComposerSession>(
         server_ctx_, ComposerSession::Mode::Server,
-        l1, composer_id, weak_from_this(), ioc_);
+        l1, composer_id, session_idx, weak_from_this()
+        , &timer_ctx_
+        );
     {
         std::lock_guard lk(composer_mu_);
         composer_sessions_[composer_id] = cs;

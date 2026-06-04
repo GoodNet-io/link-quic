@@ -25,8 +25,7 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 
-#include <asio/steady_timer.hpp>
-#include <asio/strand.hpp>
+#include <exec/timed_thread_scheduler.hpp>
 
 #include <cstdint>
 #include <deque>
@@ -46,8 +45,10 @@ public:
                      Mode                   mode,
                      gn_conn_id_t           l1_id,
                      gn_conn_id_t           composer_id,
+                     std::uint32_t          session_idx,
                      std::weak_ptr<QuicLink> transport,
-                     asio::io_context&      ioc);
+                     exec::timed_thread_context* timer_ctx
+                     );
 
     ComposerSession(const ComposerSession&)            = delete;
     ComposerSession& operator=(const ComposerSession&) = delete;
@@ -136,8 +137,7 @@ private:
     /// back below the low watermark and `CLEAR` is emitted.
     bool                                   soft_signaled_  = false;
 
-    asio::strand<asio::io_context::executor_type> strand_;
-    asio::steady_timer                            tick_timer_;
+    exec::timed_thread_context*                   timer_ctx_ = nullptr;
 };
 
 }  // namespace gn::link::quic

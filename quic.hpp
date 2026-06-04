@@ -29,13 +29,11 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
-#include <asio/executor_work_guard.hpp>
-#include <asio/io_context.hpp>
-#include <asio/steady_timer.hpp>
+#include <exec/timed_thread_scheduler.hpp>
+namespace exec = experimental::execution;
 
 #include <openssl/ssl.h>
 
@@ -144,12 +142,7 @@ private:
                                       std::string_view peer_uri);
     void composer_drop_session(gn_conn_id_t composer_id);
 
-    asio::io_context                                                 ioc_;
-    asio::executor_work_guard<asio::io_context::executor_type>       work_;
-    /// Single worker thread to drive periodic `SSL_handle_events` ticks
-    /// across all sessions. Per-session strands serialise OpenSSL state
-    /// per connection because `SSL*` is not thread-safe.
-    std::vector<std::thread>                                         workers_;
+    exec::timed_thread_context                                       timer_ctx_;
 
     /// QUIC SSL contexts. `SSL_CTX_new(OSSL_QUIC_server_method())` /
     /// `SSL_CTX_new(OSSL_QUIC_client_method())`. Constructed lazily so
@@ -199,6 +192,7 @@ private:
     std::vector<ComposerAcceptSub>                                   composer_accept_subs_;
     std::atomic<std::uint64_t>                                       next_composer_id_{1};
     std::atomic<std::uint64_t>                                       next_accept_token_{1};
+    std::atomic<std::uint32_t>                                       next_session_idx_{0};
     std::string                                                      carrier_scheme_;
 };
 
