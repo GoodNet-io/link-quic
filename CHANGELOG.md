@@ -7,6 +7,14 @@ composer surface in `docs/contracts/link.en.md` §8.
 
 ## [Unreleased]
 
+### P2300 timer_ctx migration, remove Asio worker pool
+
+`QuicLink` no longer constructs an `asio::io_context` or a worker
+thread pool. Asio is replaced by `exec::timed_thread_context timer_ctx_`
+from libunifex, keeping all timer-driven I/O on the P2300 scheduler
+already used by the rest of the kernel. `ComposerSession` gains a
+`session_idx` field for deterministic ordering of concurrent sessions.
+
 ### quic: use sdk/cpp/uri.hpp for scheme handling
 
 composer_listen / composer_connect now parse `quic://...` through
